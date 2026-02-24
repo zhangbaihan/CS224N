@@ -32,10 +32,20 @@ class CausalSelfAttention(nn.Module):
     return proj
 
   def attention(self, key, query, value, attention_mask):
-
-    ### YOUR CODE HERE
-    raise NotImplementedError
-
+    B, H, T, D = query.shape
+    scale = D ** 0.5
+    unmasked_scores = torch.matmul(query, key.transpose(-1, -2)) / scale
+    
+    #casual mask
+    causal_mask = torch.triu(torch.ones(T, T, device=unmasked_scores.device, dtype=torch.bool), diagonal=1)
+    scores = unmasked_scores.masked_fill(causal_mask, float('-inf'))
+    
+    scores = scores + attention_mask
+    attn_probs = torch.softmax(scores, dim=-1)
+    attn_probs = self.dropout(attn_probs)
+    product = torch.matmul(attn_probs, value)
+    output = rearrange(product, 'b h t d -> b t (h d)')
+    return output
 
   def forward(self, hidden_states, attention_mask):
     """
