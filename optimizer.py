@@ -61,7 +61,36 @@ class AdamW(Optimizer):
                 ###
                 ###       Refer to the default project handout for more details.
                 ### YOUR CODE HERE
-                raise NotImplementedError
+                
+                if len(state) == 0:
+                    state["step"] = 0
+                    state["exp_avg"] = torch.zeros_like(p.data)
+                    state["exp_avg_sq"] = torch.zeros_like(p.data)
 
+                # 1. Update the first and second moments of the gradients.
+                exp_avg = state["exp_avg"]
+                exp_avg_sq = state["exp_avg_sq"]
+                state["step"] += 1
+                beta1, beta2 = group["betas"]
+                exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+
+                # Efficient version:
+                # a_t = a * (sqrt(1 - beta2_t) / (1 - beta1_t))
+                # theta_t = theta_t-1 - a_t * (m_t / (sqrt(v_t) + e))
+
+                # 2. Apply bias correction
+                if group["correct_bias"]:
+                    bias_c_1 = 1 - (beta1 ** state["step"])
+                    bias_c_2 = 1 - (beta2 ** state["step"])
+                    alpha = alpha * math.sqrt(bias_c_2) / bias_c_1
+
+                # 3. Update parameters (p.data)
+                denom = exp_avg_sq.sqrt().add_(group["eps"])
+                p.data.addcdiv_(exp_avg, denom, value=-alpha)
+
+                # 4. Apply weight decay after the main gradient-based updates.
+                if group["weight_decay"] != 0:
+                    p.data.add_(p.data, alpha=-group["weight_decay"] * group["lr"])
 
         return loss
