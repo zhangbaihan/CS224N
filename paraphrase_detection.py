@@ -72,7 +72,9 @@ class ParaphraseGPT(nn.Module):
 
     'Takes a batch of sentences and produces embeddings for them.'
     output = self.gpt(input_ids, attention_mask)
-    return self.paraphrase_detection_head(output["last_token"])
+    last_token = output['last_token']
+    logits = self.gpt.hidden_state_to_token(last_token)
+    return logits
 
 
 def save_model(model, optimizer, args, filepath):
