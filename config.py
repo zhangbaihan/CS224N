@@ -206,6 +206,10 @@ class GPT2Config(PretrainedConfig):
           gradient_checkpointing=False,
           position_embedding_type="learnable",
           use_cache=True,
+          use_lora=False,
+          lora_r=8,
+          lora_alpha=16.0,
+          lora_dropout=0.0,
           **kwargs
   ):
     super().__init__(pad_token_id=pad_token_id, **kwargs)
@@ -225,6 +229,10 @@ class GPT2Config(PretrainedConfig):
     self.gradient_checkpointing = gradient_checkpointing
     self.position_embedding_type = position_embedding_type
     self.use_cache = use_cache
+    self.use_lora = use_lora
+    self.lora_r = lora_r
+    self.lora_alpha = lora_alpha
+    self.lora_dropout = lora_dropout
 
 
 

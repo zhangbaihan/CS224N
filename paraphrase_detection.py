@@ -21,6 +21,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from lora_linear import LoRALinear
 
 from datasets import (
   ParaphraseDetectionDataset,
@@ -44,6 +45,20 @@ def seed_everything(seed=11711):
   torch.backends.cudnn.benchmark = False
   torch.backends.cudnn.deterministic = True
 
+def mark_only_lora_and_head_trainable(gpt: nn.Module, head: nn.Module):
+  for p in gpt.parameters():
+    p.requires_grad = False
+
+  # Unfreeze LoRA params
+  for m in gpt.modules():
+    if isinstance(m, LoRALinear):
+      m.A.requires_grad = True
+      m.B.requires_grad = True
+
+  # Unfreeze head params
+  for p in head.parameters():
+    p.requires_grad = True
+
 
 class ParaphraseGPT(nn.Module):
   """Your GPT-2 Model designed for paraphrase detection."""
@@ -53,9 +68,12 @@ class ParaphraseGPT(nn.Module):
     self.gpt = GPT2Model.from_pretrained(model=args.model_size, d=args.d, l=args.l, num_heads=args.num_heads)
     self.paraphrase_detection_head = nn.Linear(args.d, 2)  # Paraphrase detection has two outputs: 1 (yes) or 0 (no).
 
-    # By default, fine-tune the full model.
+    # # By default, fine-tune the full model.
     for param in self.gpt.parameters():
       param.requires_grad = True
+
+    # LoRA fine-tuning
+    mark_only_lora_and_head_trainable(self.gpt, self.paraphrase_detection_head)
 
   def forward(self, input_ids, attention_mask):
     """
@@ -115,7 +133,13 @@ def train(args):
   model = model.to(device)
 
   lr = args.lr
-  optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.)
+
+  # # default
+  # optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.)
+  # LoRA
+  trainable = [p for p in model.parameters() if p.requires_grad]
+  optimizer = AdamW(trainable, lr=lr, weight_decay=0.)
+
   best_dev_acc = 0
 
   # Run for the specified number of epochs.
