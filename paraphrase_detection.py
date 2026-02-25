@@ -90,12 +90,11 @@ class ParaphraseGPT(nn.Module):
 
     'Takes a batch of sentences and produces embeddings for them.'
     output = self.gpt(input_ids, attention_mask)
-    last_token = output['last_token']
-    logits = self.gpt.hidden_state_to_token(last_token)
-    yes, no = 8505, 3919
-    y_logits = logits[:, yes]
-    n_logits = logits[:, no]
-    logits = torch.stack([n_logits, y_logits], dim=1)
+    last_tokens = output["last_token"]
+    pred = self.paraphrase_detection_head(last_tokens)
+    logits = last_tokens.new_full((last_tokens.size(0), self.gpt.config.vocab_size), float("-inf"))
+    logits[:, 3919] = pred[:, 0] # no
+    logits[:, 8505] = pred[:, 1] # yes
     return logits
 
 
