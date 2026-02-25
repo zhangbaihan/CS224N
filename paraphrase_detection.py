@@ -21,6 +21,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from lora_linear import LoRALinear
 
 from datasets import (
   ParaphraseDetectionDataset,
@@ -44,6 +45,20 @@ def seed_everything(seed=11711):
   torch.backends.cudnn.benchmark = False
   torch.backends.cudnn.deterministic = True
 
+def mark_only_lora_and_head_trainable(gpt: nn.Module, head: nn.Module):
+  for p in gpt.parameters():
+    p.requires_grad = False
+
+  # Unfreeze LoRA params
+  for m in gpt.modules():
+    if isinstance(m, LoRALinear):
+      m.A.requires_grad = True
+      m.B.requires_grad = True
+
+  # Unfreeze head params
+  for p in head.parameters():
+    p.requires_grad = True
+
 
 class ParaphraseGPT(nn.Module):
   """Your GPT-2 Model designed for paraphrase detection."""
@@ -53,9 +68,13 @@ class ParaphraseGPT(nn.Module):
     self.gpt = GPT2Model.from_pretrained(model=args.model_size, d=args.d, l=args.l, num_heads=args.num_heads)
     self.paraphrase_detection_head = nn.Linear(args.d, 2)  # Paraphrase detection has two outputs: 1 (yes) or 0 (no).
 
-    # By default, fine-tune the full model.
-    for param in self.gpt.parameters():
-      param.requires_grad = True
+    if self.gpt.config.use_lora == False:
+      # By default, fine-tune the full model.
+      for param in self.gpt.parameters():
+        param.requires_grad = True
+    else:
+      # LoRA fine-tuning
+      mark_only_lora_and_head_trainable(self.gpt, self.paraphrase_detection_head)
 
   def forward(self, input_ids, attention_mask):
     """
@@ -72,12 +91,11 @@ class ParaphraseGPT(nn.Module):
 
     'Takes a batch of sentences and produces embeddings for them.'
     output = self.gpt(input_ids, attention_mask)
-    last_token = output['last_token']
-    logits = self.gpt.hidden_state_to_token(last_token)
-    yes, no = 8505, 3919
-    y_logits = logits[:, yes]
-    n_logits = logits[:, no]
-    logits = torch.stack([n_logits, y_logits], dim=1)
+    last_tokens = output["last_token"]
+    pred = self.paraphrase_detection_head(last_tokens)
+    logits = last_tokens.new_full((last_tokens.size(0), self.gpt.config.vocab_size), float("-inf"))
+    logits[:, 3919] = pred[:, 0] # no
+    logits[:, 8505] = pred[:, 1] # yes
     return logits
 
 
@@ -97,7 +115,10 @@ def save_model(model, optimizer, args, filepath):
 
 def train(args):
   """Train GPT-2 for paraphrase detection on the Quora dataset."""
-  device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+  if args.use_gpu and torch.backends.mps.is_available():
+    device = torch.device('mps')
+  else:
+    device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
   # Create the data and its corresponding datasets and dataloader.
   para_train_data = load_paraphrase_data(args.para_train)
   para_dev_data = load_paraphrase_data(args.para_dev)
@@ -115,7 +136,15 @@ def train(args):
   model = model.to(device)
 
   lr = args.lr
-  optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.)
+
+  if model.gpt.config.use_lora == False:
+    # default
+    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.)
+  else:
+    # LoRA
+    trainable = [p for p in model.parameters() if p.requires_grad]
+    optimizer = AdamW(trainable, lr=lr, weight_decay=0.)
+
   best_dev_acc = 0
 
   # Run for the specified number of epochs.
@@ -155,8 +184,11 @@ def train(args):
 @torch.no_grad()
 def test(args):
   """Evaluate your model on the dev and test datasets; save the predictions to disk."""
-  device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
-  saved = torch.load(args.filepath)
+  if args.use_gpu and torch.backends.mps.is_available():
+    device = torch.device('mps')
+  else:
+    device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+  saved = torch.load(args.filepath, weights_only=False)
 
   model = ParaphraseGPT(saved['args'])
   model.load_state_dict(saved['model'])
