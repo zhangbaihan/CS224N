@@ -74,6 +74,10 @@ class ParaphraseGPT(nn.Module):
     output = self.gpt(input_ids, attention_mask)
     last_token = output['last_token']
     logits = self.gpt.hidden_state_to_token(last_token)
+    yes, no = 8505, 3919
+    y_logits = logits[:, yes]
+    n_logits = logits[:, no]
+    logits = torch.stack([n_logits, y_logits], dim=1)
     return logits
 
 
