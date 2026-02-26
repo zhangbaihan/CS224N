@@ -115,7 +115,10 @@ def save_model(model, optimizer, args, filepath):
 
 def train(args):
   """Train GPT-2 for paraphrase detection on the Quora dataset."""
-  device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+  if args.use_gpu and torch.backends.mps.is_available():
+    device = torch.device('mps')
+  else:
+    device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
   # Create the data and its corresponding datasets and dataloader.
   para_train_data = load_paraphrase_data(args.para_train)
   para_dev_data = load_paraphrase_data(args.para_dev)
@@ -134,11 +137,13 @@ def train(args):
 
   lr = args.lr
 
-  # # default
-  # optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.)
-  # LoRA
-  trainable = [p for p in model.parameters() if p.requires_grad]
-  optimizer = AdamW(trainable, lr=lr, weight_decay=0.)
+  if model.gpt.config.use_lora == False:
+    # default
+    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.)
+  else:
+    # LoRA
+    trainable = [p for p in model.parameters() if p.requires_grad]
+    optimizer = AdamW(trainable, lr=lr, weight_decay=0.)
 
   best_dev_acc = 0
 
@@ -179,8 +184,11 @@ def train(args):
 @torch.no_grad()
 def test(args):
   """Evaluate your model on the dev and test datasets; save the predictions to disk."""
-  device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
-  saved = torch.load(args.filepath)
+  if args.use_gpu and torch.backends.mps.is_available():
+    device = torch.device('mps')
+  else:
+    device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+  saved = torch.load(args.filepath, weights_only=False)
 
   model = ParaphraseGPT(saved['args'])
   model.load_state_dict(saved['model'])
