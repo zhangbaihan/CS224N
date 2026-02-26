@@ -68,12 +68,13 @@ class ParaphraseGPT(nn.Module):
     self.gpt = GPT2Model.from_pretrained(model=args.model_size, d=args.d, l=args.l, num_heads=args.num_heads)
     self.paraphrase_detection_head = nn.Linear(args.d, 2)  # Paraphrase detection has two outputs: 1 (yes) or 0 (no).
 
-    # # By default, fine-tune the full model.
-    for param in self.gpt.parameters():
-      param.requires_grad = True
-
-    # LoRA fine-tuning
-    mark_only_lora_and_head_trainable(self.gpt, self.paraphrase_detection_head)
+    if self.gpt.config.use_lora == False:
+      # By default, fine-tune the full model.
+      for param in self.gpt.parameters():
+        param.requires_grad = True
+    else:
+      # LoRA fine-tuning
+      mark_only_lora_and_head_trainable(self.gpt, self.paraphrase_detection_head)
 
   def forward(self, input_ids, attention_mask):
     """

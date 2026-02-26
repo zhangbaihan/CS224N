@@ -36,3 +36,11 @@ class LoRALinear(nn.Module):
     @torch.no_grad()
     def merge(self):
         self.base.weight += self.scaling * (self.B @ self.A)
+
+    @property
+    def weight(self):
+        return self.base.weight
+
+    @property
+    def bias(self):
+        return self.base.bias

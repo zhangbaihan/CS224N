@@ -14,7 +14,7 @@ class CausalSelfAttention(nn.Module):
     self.all_head_size = self.num_attention_heads * self.attention_head_size
 
     # Initialize the linear transformation layers for key, value, query.
-    self.use_lora = config.use_lora
+    self.use_lora = getattr(config, "use_lora", False)
     if self.use_lora:
       r = config.lora_r
       alpha = config.lora_alpha
