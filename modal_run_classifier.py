@@ -18,7 +18,7 @@ image = (
 SCRIPT_NAME = "classifier.py"
 
 
-@app.function(image=image, gpu="L4", timeout=60 * 60 * 6)
+@app.function(image=image, gpu="A100", timeout=60 * 60 * 6)
 def run_remote():
     import os
     import subprocess
@@ -33,6 +33,10 @@ def run_remote():
         "--fine-tune-mode",
         "full-model",   # change to last-linear-layer if needed
         "--use_gpu",
+        "--batch_size", "64",
+        "--lr", "1e-4",
+        "--hidden_dropout_prob", "0.5",
+        "--epochs", "20"
     ]
 
     subprocess.check_call(cmd)
