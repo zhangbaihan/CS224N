@@ -15,6 +15,7 @@ from transformers import GPT2Tokenizer
 from sklearn.metrics import f1_score, accuracy_score
 
 from models.gpt2 import GPT2Model
+from lora_linear import LoRALinear
 from optimizer import AdamW
 from tqdm import tqdm
 
@@ -43,18 +44,24 @@ class GPT2SentimentClassifier(torch.nn.Module):
   def __init__(self, config):
     super(GPT2SentimentClassifier, self).__init__()
     self.num_labels = config.num_labels
-    self.gpt = GPT2Model.from_pretrained()
+    use_lora = getattr(config, 'fine_tune_mode', '') == 'lora'
+    self.gpt = GPT2Model.from_pretrained(use_lora=use_lora)
 
-    # Pretrain mode does not require updating GPT paramters.
-    assert config.fine_tune_mode in ["last-linear-layer", "full-model"]
-    for param in self.gpt.parameters():
-      if config.fine_tune_mode == 'last-linear-layer':
+    assert config.fine_tune_mode in ["last-linear-layer", "full-model", "lora"]
+    if config.fine_tune_mode == 'last-linear-layer':
+      for param in self.gpt.parameters():
         param.requires_grad = False
-      elif config.fine_tune_mode == 'full-model':
+    elif config.fine_tune_mode == 'full-model':
+      for param in self.gpt.parameters():
         param.requires_grad = True
+    elif config.fine_tune_mode == 'lora':
+      for param in self.gpt.parameters():
+        param.requires_grad = False
+      for m in self.gpt.modules():
+        if isinstance(m, LoRALinear):
+          m.A.requires_grad = True
+          m.B.requires_grad = True
 
-    ### TODO: Create any instance variables you need to classify the sentiment of BERT embeddings.
-    ### YOUR CODE HERE
     self.dropout = torch.nn.Dropout(config.hidden_dropout_prob)
     self.classifier = torch.nn.Linear(config.hidden_size, self.num_labels)
 
@@ -272,7 +279,8 @@ def train(args):
   model = model.to(device)
 
   lr = args.lr
-  optimizer = AdamW(model.parameters(), lr=lr)
+  trainable = [p for p in model.parameters() if p.requires_grad]
+  optimizer = AdamW(trainable, lr=lr)
   best_dev_acc = 0
 
   # Run for the specified number of epochs.
@@ -357,7 +365,7 @@ def get_args():
   parser.add_argument("--epochs", type=int, default=10)
   parser.add_argument("--fine-tune-mode", type=str,
                       help='last-linear-layer: the GPT parameters are frozen and the task specific head parameters are updated; full-model: GPT parameters are updated as well',
-                      choices=('last-linear-layer', 'full-model'), default="last-linear-layer")
+                      choices=('last-linear-layer', 'full-model', 'lora'), default="last-linear-layer")
   parser.add_argument("--use_gpu", action='store_true')
 
   parser.add_argument("--batch_size", help='sst: 64, cfimdb: 8 can fit a 12GB GPU', type=int, default=8)

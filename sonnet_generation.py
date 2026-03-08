@@ -24,6 +24,7 @@ from datasets import (
   SonnetsDataset,
 )
 from models.gpt2 import GPT2Model
+from lora_linear import LoRALinear
 
 from optimizer import AdamW
 
@@ -46,13 +47,23 @@ class SonnetGPT(nn.Module):
 
   def __init__(self, args):
     super().__init__()
-    self.gpt = GPT2Model.from_pretrained(model=args.model_size, d=args.d, l=args.l, num_heads=args.num_heads)
+    fine_tune_mode = getattr(args, 'fine_tune_mode', 'full-model')
+    use_lora = fine_tune_mode == 'lora'
+    self.gpt = GPT2Model.from_pretrained(model=args.model_size, d=args.d, l=args.l,
+                                         num_heads=args.num_heads, use_lora=use_lora)
     self.tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     self.tokenizer.pad_token = self.tokenizer.eos_token
 
-    # By default, fine-tune the full model. TODO: this is maybe not idea.
-    for param in self.gpt.parameters():
-      param.requires_grad = True
+    if fine_tune_mode == 'full-model':
+      for param in self.gpt.parameters():
+        param.requires_grad = True
+    elif fine_tune_mode == 'lora':
+      for param in self.gpt.parameters():
+        param.requires_grad = False
+      for m in self.gpt.modules():
+        if isinstance(m, LoRALinear):
+          m.A.requires_grad = True
+          m.B.requires_grad = True
 
   def forward(self, input_ids, attention_mask):
     """
@@ -149,7 +160,8 @@ def train(args):
   model = model.to(device)
 
   lr = args.lr
-  optimizer = AdamW(model.parameters(), lr=lr)
+  trainable = [p for p in model.parameters() if p.requires_grad]
+  optimizer = AdamW(trainable, lr=lr)
 
   # Run for the specified number of epochs.
   for epoch in range(args.epochs):
@@ -235,6 +247,8 @@ def get_args():
   parser.add_argument("--top_p", type=float, help="Cumulative probability distribution for nucleus sampling.",
                       default=0.9)
 
+  parser.add_argument("--fine_tune_mode", type=str,
+                      choices=('full-model', 'lora'), default='full-model')
   parser.add_argument("--batch_size", help='The training batch size.', type=int, default=8)
   parser.add_argument("--lr", type=float, help="learning rate", default=1e-5)
   parser.add_argument("--model_size", type=str, help="The model size as specified on hugging face.",
@@ -265,7 +279,7 @@ def add_arguments(args):
 
 if __name__ == "__main__":
   args = get_args()
-  args.filepath = f'{args.epochs}-{args.lr}-sonnet.pt'  # Save path.
+  args.filepath = f'{args.fine_tune_mode}-{args.epochs}-{args.lr}-sonnet.pt'
   seed_everything(args.seed)  # Fix the seed for reproducibility.
   train(args)
   generate_submission_sonnets(args)

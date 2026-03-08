@@ -65,15 +65,19 @@ class ParaphraseGPT(nn.Module):
 
   def __init__(self, args):
     super().__init__()
-    self.gpt = GPT2Model.from_pretrained(model=args.model_size, d=args.d, l=args.l, num_heads=args.num_heads)
-    self.paraphrase_detection_head = nn.Linear(args.d, 2)  # Paraphrase detection has two outputs: 1 (yes) or 0 (no).
+    fine_tune_mode = getattr(args, 'fine_tune_mode', 'full-model')
+    use_lora = fine_tune_mode == 'lora'
+    self.gpt = GPT2Model.from_pretrained(model=args.model_size, d=args.d, l=args.l,
+                                         num_heads=args.num_heads, use_lora=use_lora)
+    self.paraphrase_detection_head = nn.Linear(args.d, 2)
 
-    if self.gpt.config.use_lora == False:
-      # By default, fine-tune the full model.
+    if fine_tune_mode == 'last-linear-layer':
+      for param in self.gpt.parameters():
+        param.requires_grad = False
+    elif fine_tune_mode == 'full-model':
       for param in self.gpt.parameters():
         param.requires_grad = True
-    else:
-      # LoRA fine-tuning
+    elif fine_tune_mode == 'lora':
       mark_only_lora_and_head_trainable(self.gpt, self.paraphrase_detection_head)
 
   def forward(self, input_ids, attention_mask):
@@ -136,14 +140,8 @@ def train(args):
   model = model.to(device)
 
   lr = args.lr
-
-  if model.gpt.config.use_lora == False:
-    # default
-    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.)
-  else:
-    # LoRA
-    trainable = [p for p in model.parameters() if p.requires_grad]
-    optimizer = AdamW(trainable, lr=lr, weight_decay=0.)
+  trainable = [p for p in model.parameters() if p.requires_grad]
+  optimizer = AdamW(trainable, lr=lr, weight_decay=0.)
 
   best_dev_acc = 0
 
@@ -235,6 +233,8 @@ def get_args():
   parser.add_argument("--epochs", type=int, default=10)
   parser.add_argument("--use_gpu", action='store_true')
 
+  parser.add_argument("--fine_tune_mode", type=str,
+                      choices=('last-linear-layer', 'full-model', 'lora'), default='full-model')
   parser.add_argument("--batch_size", help='sst: 64, cfimdb: 8 can fit a 12GB GPU', type=int, default=8)
   parser.add_argument("--lr", type=float, help="learning rate", default=1e-5)
   parser.add_argument("--model_size", type=str,
