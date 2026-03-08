@@ -277,9 +277,46 @@ def add_arguments(args):
   return args
 
 
+@torch.no_grad()
+def generate_and_eval_dev(args):
+  """Generate sonnets from dev held-out prompts and compute CHRF score."""
+  from evaluation import test_sonnet
+
+  device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+  saved = torch.load(f'{args.epochs-1}_{args.filepath}', weights_only=False)
+
+  model = SonnetGPT(saved['args'])
+  model.load_state_dict(saved['model'])
+  model = model.to(device)
+  model.eval()
+
+  dev_dataset = SonnetsDataset('data/sonnets_held_out_dev.txt')
+  dev_out = 'predictions/generated_sonnets_dev.txt'
+
+  generated_sonnets = []
+  for batch in dev_dataset:
+    sonnet_id = batch[0]
+    encoding = model.tokenizer(batch[1], return_tensors='pt', padding=False, truncation=True).to(device)
+    output = model.generate(encoding['input_ids'], temperature=args.temperature, top_p=args.top_p)[0][0]
+    decoded_output = model.tokenizer.decode(output)
+    full_sonnet = f'{decoded_output}\n\n'
+    generated_sonnets.append((sonnet_id, full_sonnet))
+
+  with open(dev_out, "w+") as f:
+    f.write(f"--Generated Sonnets-- \n\n")
+    for sonnet in generated_sonnets:
+      f.write(f"\n{sonnet[0]}\n")
+      f.write(sonnet[1])
+
+  chrf_score = test_sonnet(test_path=dev_out, gold_path='data/TRUE_sonnets_held_out_dev.txt')
+  print(f"Dev CHRF score :: {chrf_score:.3f}")
+  return chrf_score
+
+
 if __name__ == "__main__":
   args = get_args()
   args.filepath = f'{args.fine_tune_mode}-{args.epochs}-{args.lr}-sonnet.pt'
   seed_everything(args.seed)  # Fix the seed for reproducibility.
   train(args)
   generate_submission_sonnets(args)
+  generate_and_eval_dev(args)

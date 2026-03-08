@@ -19,6 +19,7 @@ image = (
         "transformers==4.46.3",
         "scikit-learn",
         "importlib-metadata==3.7.0",
+        "sacrebleu==2.5.1",
     )
     .add_local_dir(
         local_path="/Users/baihanzhang/Desktop/CS224N/CS224N",
@@ -37,8 +38,11 @@ def train_sonnets():
 
     result = subprocess.run(
         ["python", "sonnet_generation.py", "--use_gpu"],
-        text=True,
+        capture_output=True, text=True,
     )
+    print(result.stdout)
+    if result.stderr:
+        print("STDERR:", result.stderr)
     if result.returncode != 0:
         raise RuntimeError(f"Training failed with code {result.returncode}")
 
@@ -48,26 +52,30 @@ def train_sonnets():
             os.system(f"cp /root/project/{f} /vol/{f}")
             print(f"Saved {f} to volume")
 
-    sonnet_path = "/root/project/predictions/generated_sonnets.txt"
-    if os.path.exists(sonnet_path):
-        os.system("cp /root/project/predictions/generated_sonnets.txt /vol/generated_sonnets.txt")
-        with open(sonnet_path) as f:
-            content = f.read()
-        print("=== Generated Sonnets ===")
-        print(content)
-        return content
+    # Read both test and dev generated sonnets
+    outputs = {}
+    for name in ["generated_sonnets.txt", "generated_sonnets_dev.txt"]:
+        path = f"/root/project/predictions/{name}"
+        if os.path.exists(path):
+            os.system(f"cp {path} /vol/{name}")
+            with open(path) as f:
+                outputs[name] = f.read()
 
     vol.commit()
-    return ""
+    return {"stdout": result.stdout, **outputs}
 
 
 @app.local_entrypoint()
 def main():
-    sonnets = train_sonnets.remote()
+    result = train_sonnets.remote()
     out_dir = "/Users/baihanzhang/Desktop/CS224N/CS224N/predictions"
     os.makedirs(out_dir, exist_ok=True)
-    with open(f"{out_dir}/generated_sonnets.txt", "w") as f:
-        f.write(sonnets)
-    print(f"Saved generated_sonnets.txt ({len(sonnets)} chars)")
+
+    for name in ["generated_sonnets.txt", "generated_sonnets_dev.txt"]:
+        if name in result:
+            with open(f"{out_dir}/{name}", "w") as f:
+                f.write(result[name])
+            print(f"Saved {name}")
+
     print("\nCheckpoints saved to Modal volume 'cs224n-checkpoints'.")
     print("To download them: modal volume get cs224n-checkpoints <filename> .")
