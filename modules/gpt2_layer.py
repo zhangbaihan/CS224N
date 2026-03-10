@@ -1,23 +1,35 @@
 from torch import nn
-
 import torch.nn.functional as F
 
 from modules.attention import CausalSelfAttention
+from lora_linear import LoRALinear
 
 class GPT2Layer(nn.Module):
   def __init__(self, config):
     super().__init__()
     # Multi-head attention.
     self.self_attention = CausalSelfAttention(config)
+    self.use_lora = getattr(config, "use_lora", False)
+    
+    if self.use_lora:
+      r = config.lora_r
+      alpha = config.lora_alpha
+      lora_dropout = config.lora_dropout
+
+      self.attention_dense = LoRALinear(config.hidden_size, config.hidden_size, bias=True, r=r, alpha=alpha, dropout=lora_dropout)
+      self.interm_dense = LoRALinear(config.hidden_size, config.intermediate_size, bias=True, r=r, alpha=alpha, dropout=lora_dropout)
+      self.out_dense = LoRALinear(config.intermediate_size, config.hidden_size, bias=True, r=r, alpha=alpha, dropout=lora_dropout)
+    else:
+      self.attention_dense = nn.Linear(config.hidden_size, config.hidden_size)
+      self.interm_dense = nn.Linear(config.hidden_size, config.intermediate_size)
+      self.out_dense = nn.Linear(config.intermediate_size, config.hidden_size)
+    
     # Add-norm for multi-head attention.
-    self.attention_dense = nn.Linear(config.hidden_size, config.hidden_size)
     self.attention_layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
     self.attention_dropout = nn.Dropout(config.hidden_dropout_prob)
     # Feed forward.
-    self.interm_dense = nn.Linear(config.hidden_size, config.intermediate_size)
     self.interm_af = F.gelu
     # Add-norm for feed forward.
-    self.out_dense = nn.Linear(config.intermediate_size, config.hidden_size)
     self.out_layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
     self.out_dropout = nn.Dropout(config.hidden_dropout_prob)
 
@@ -32,8 +44,6 @@ class GPT2Layer(nn.Module):
     x = dense_layer(output)
     x = input + dropout(x)
     return x 
-
-
 
   def forward(self, hidden_states, attention_mask):
     """
@@ -54,6 +64,6 @@ class GPT2Layer(nn.Module):
     ff = self.interm_dense(norm)
     ff = self.interm_af(ff)
     output = self.add(hidden_states, ff, self.out_dense, self.out_dropout)
-    
+
     return output
 
