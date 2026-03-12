@@ -66,6 +66,7 @@ class ParaphraseGPT(nn.Module):
   def __init__(self, args):
     super().__init__()
     self.gpt = GPT2Model.from_pretrained(model=args.model_size, d=args.d, l=args.l, num_heads=args.num_heads)
+    self.dropout = nn.Dropout(args.hidden_dropout_prob)
     self.paraphrase_detection_head = nn.Linear(args.d, 2)  # Paraphrase detection has two outputs: 1 (yes) or 0 (no).
 
     if self.gpt.config.use_lora == False:
@@ -92,6 +93,7 @@ class ParaphraseGPT(nn.Module):
     'Takes a batch of sentences and produces embeddings for them.'
     output = self.gpt(input_ids, attention_mask)
     last_tokens = output["last_token"]
+    last_tokens = self.dropout(last_tokens)
     pred = self.paraphrase_detection_head(last_tokens)
     logits = last_tokens.new_full((last_tokens.size(0), self.gpt.config.vocab_size), float("-inf"))
     logits[:, 3919] = pred[:, 0] # no
@@ -139,11 +141,11 @@ def train(args):
 
   if model.gpt.config.use_lora == False:
     # default
-    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.)
+    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=args.weight_decay)
   else:
     # LoRA
     trainable = [p for p in model.parameters() if p.requires_grad]
-    optimizer = AdamW(trainable, lr=lr, weight_decay=0.)
+    optimizer = AdamW(trainable, lr=lr, weight_decay=args.weight_decay)
 
   best_dev_acc = 0
 
@@ -234,6 +236,8 @@ def get_args():
   parser.add_argument("--seed", type=int, default=11711)
   parser.add_argument("--epochs", type=int, default=10)
   parser.add_argument("--use_gpu", action='store_true')
+  parser.add_argument("--weight_decay", type=float, default=0.0)
+  parser.add_argument("--hidden_dropout_prob", type=float, default=0.0)
 
   parser.add_argument("--batch_size", help='sst: 64, cfimdb: 8 can fit a 12GB GPU', type=int, default=8)
   parser.add_argument("--lr", type=float, help="learning rate", default=1e-5)

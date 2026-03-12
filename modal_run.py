@@ -29,9 +29,11 @@ def run_remote():
         "python",
         SCRIPT_NAME,
         "--use_gpu",
-        "--epochs", "2",
-        "--lr", "1e-4",
-        #"--batch_size", "8",
+        "--epochs", "10",
+        "--lr", "4e-4",
+        #"--weight_decay", "1e-4",
+        #"--model_size", "gpt2"
+        "--batch_size", "64",
     ]
     subprocess.check_call(cmd)
 

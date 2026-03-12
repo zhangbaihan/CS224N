@@ -206,7 +206,7 @@ class GPT2Config(PretrainedConfig):
           gradient_checkpointing=False,
           position_embedding_type="learnable",
           use_cache=True,
-          use_lora=False,
+          use_lora=True,
           lora_r=8,
           lora_alpha=16.0,
           lora_dropout=0.0,
